@@ -2,7 +2,6 @@ package com.self.help.graph;
 
 import com.self.help.graph.core.GraphEngine;
 import com.self.help.graph.core.Row;
-import org.roaringbitmap.RoaringBitmap;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -15,7 +14,7 @@ public class GraphService {
     public GraphService() {
         System.out.println("Initializing GraphService");
         graphEngine = new GraphEngine();
-        StaticDataLoader.getStaticData().forEach(record -> graphEngine.addRow(record.from(), record.to(), record.relation()));
+        StaticDataLoader.getStaticData().forEach(record -> graphEngine.addRow(record.from(), record.fromAttr1(), record.to(), record.toAttr1(), record.relation()));
     }
 
     Set<Row> getRows() {
@@ -23,7 +22,7 @@ public class GraphService {
     }
 
     public void addRow(Row row) {
-        graphEngine.addRow(row.from(), row.to(), row.relation());
+        graphEngine.addRow(row.from(), row.fromAttr1(), row.to(), row.toAttr1(), row.relation());
     }
 
     public List<Row> concentrateByRelation(List<String> relations) {

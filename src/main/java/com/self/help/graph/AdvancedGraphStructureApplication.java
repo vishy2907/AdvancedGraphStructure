@@ -9,3 +9,4 @@ public class AdvancedGraphStructureApplication {
 		SpringApplication.run(AdvancedGraphStructureApplication.class, args);
 	}
 }
+

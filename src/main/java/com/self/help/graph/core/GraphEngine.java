@@ -9,34 +9,52 @@ import java.util.*;
 @Data
 public class GraphEngine {
     private BiDirectionalDictionary nodeDict;
+    private BiDirectionalDictionary attribute1Dict;
+
     private BiDirectionalDictionary relDict;
 
     private InvertedIndexColumn fromInverted;
+    private InvertedIndexColumn fromAttribute1Inverted;
     private InvertedIndexColumn toInverted;
+    private InvertedIndexColumn toAttribute1Inverted;
+
     private InvertedIndexColumn relationInverted;
+
+    private RoaringBitmap deletedFromRows;
+    private RoaringBitmap deletedToRows;
 
     private RowStore rowStore;
 
     public GraphEngine() {
         nodeDict = new BiDirectionalDictionary();
+        attribute1Dict = new BiDirectionalDictionary();
         relDict = new BiDirectionalDictionary();
 
         fromInverted = new InvertedIndexColumn();
+        fromAttribute1Inverted = new  InvertedIndexColumn();
         toInverted = new InvertedIndexColumn();
+        toAttribute1Inverted = new  InvertedIndexColumn();
         relationInverted = new InvertedIndexColumn();
+
+        deletedFromRows = new RoaringBitmap();
+        deletedToRows = new RoaringBitmap();
 
         rowStore = new RowStore();
     }
 
-    public void addRow(String from, String to, String relation) {
+    public void addRow(String from, String fromAttribute1, String to, String toAttribute1, String relation) {
         int fromId = nodeDict.getOrCreateId(from);
+        int fromAttrId = attribute1Dict.getOrCreateId(fromAttribute1);
         int toId = nodeDict.getOrCreateId(to);
+        int toAttrId = attribute1Dict.getOrCreateId(toAttribute1);
         int relId = relDict.getOrCreateId(relation);
 
-        int rowId = rowStore.addRow(fromId, toId, relId);
+        int rowId = rowStore.addRow(fromId, fromAttrId, toId, toAttrId, relId);
 
         fromInverted.addRowToValue(fromId, rowId);
+        fromAttribute1Inverted.addRowToValue(fromAttrId, rowId);
         toInverted.addRowToValue(toId, rowId);
+        toAttribute1Inverted.addRowToValue(toAttrId, rowId);
         relationInverted.addRowToValue(relId, rowId);
     }
 
@@ -47,16 +65,21 @@ public class GraphEngine {
         for (int i = 0; i < rowCount; i++) {
             // 1. Get the Dict IDs from the RowStore (Forward Index)
             int fromId = rowStore.getFromId(i);
+            int fromAttr1 = rowStore.getFromAttr1Id(i);
             int toId = rowStore.getToId(i);
+            int toAttr1 = rowStore.getToAttr1Id(i);
             int relId = rowStore.getRelId(i);
+
 
             // 2. Translate Dict IDs back to Strings using Dictionaries
             String fromValue = nodeDict.getValue(fromId);
+            String fromAttrValue = attribute1Dict.getValue(fromAttr1);
             String toValue = nodeDict.getValue(toId);
+            String toAttrValue = attribute1Dict.getValue(toAttr1);
             String relValue = relDict.getValue(relId);
 
             // 3. Create the Record and add to list
-            results.add(new Row(fromValue, toValue, relValue));
+            results.add(new Row(fromValue, fromAttrValue, toValue, toAttrValue, relValue));
         }
 
         return results;
@@ -86,7 +109,9 @@ public class GraphEngine {
             int rowId = it.next();
             results.add(new Row(
                     nodeDict.getValue(rowStore.getFromId(rowId)),
+                    attribute1Dict.getValue(rowStore.getFromAttr1Id(rowId)),
                     nodeDict.getValue(rowStore.getToId(rowId)),
+                    attribute1Dict.getValue(rowStore.getToAttr1Id(rowId)),
                     relDict.getValue(rowStore.getRelId(rowId))
             ));
         }
@@ -96,7 +121,7 @@ public class GraphEngine {
 
     public Set<String> getUniqueRelations() {
         Set<String> results = new LinkedHashSet<>();
-        for(int i=0;i<relDict.size();i++) {
+        for (int i = 0; i < relDict.size(); i++) {
             results.add(relDict.getValue(i));
         }
         return results;
@@ -104,7 +129,7 @@ public class GraphEngine {
 
     public Set<String> getUniqueNodes() {
         Set<String> results = new LinkedHashSet<>();
-        for(int i=0;i<nodeDict.size();i++) {
+        for (int i = 0; i < nodeDict.size(); i++) {
             results.add(nodeDict.getValue(i));
         }
         return results;
@@ -144,8 +169,9 @@ public class GraphEngine {
     /**
      * High-performance Level-Synchronous BFS for Directed Acyclic Graphs (DAGs).
      * * @param initialFrontier The starting Node IDs
-     * @param collectedRows   The global bitmap where matching Row IDs are accumulated
-     * @param isUpward        True for Ancestry (Parents), False for Descendants (Children)
+     *
+     * @param collectedRows The global bitmap where matching Row IDs are accumulated
+     * @param isUpward      True for Ancestry (Parents), False for Descendants (Children)
      */
     private void traverseDAG(RoaringBitmap initialFrontier, RoaringBitmap collectedRows, boolean isUpward) {
         RoaringBitmap currentFrontier = initialFrontier.clone();
@@ -209,7 +235,9 @@ public class GraphEngine {
             int rowId = it.next();
             results.add(new Row(
                     nodeDict.getValue(rowStore.getFromId(rowId)),
+                    attribute1Dict.getValue(rowStore.getFromAttr1Id(rowId)),
                     nodeDict.getValue(rowStore.getToId(rowId)),
+                    attribute1Dict.getValue(rowStore.getToAttr1Id(rowId)),
                     relDict.getValue(rowStore.getRelId(rowId))
             ));
         }
