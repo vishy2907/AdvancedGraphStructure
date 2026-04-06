@@ -5,6 +5,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 
@@ -38,22 +39,22 @@ public class GraphController {
     }
 
     @PostMapping("/concentrateOnRelations")
-    public ResponseEntity<List<Row>> concentrateOnRelations(@RequestBody List<String> relations) {
+    public ResponseEntity<Set<Row>> concentrateOnRelations(@RequestBody List<String> relations) {
         if (relations == null || relations.isEmpty()) {
-            return ResponseEntity.ok(Collections.emptyList());
+            return ResponseEntity.ok(Collections.emptySet());
         }
 
         List<Row> filteredRows = graphService.concentrateByRelation(relations);
-        return ResponseEntity.ok(filteredRows);
+        return ResponseEntity.ok(new LinkedHashSet<>(filteredRows));
     }
 
     @PostMapping("/concentrateOnNodes")
-    public ResponseEntity<List<Row>> concentrateOnNodes(@RequestBody List<String> nodeNames) {
+    public ResponseEntity<Set<Row>> concentrateOnNodes(@RequestBody List<String> nodeNames) {
         if (nodeNames == null || nodeNames.isEmpty()) {
-            return ResponseEntity.ok(Collections.emptyList());
+            return ResponseEntity.ok(Collections.emptySet());
         }
 
         List<Row> filteredRows = graphService.concentrateOnNodes(nodeNames);
-        return ResponseEntity.ok(filteredRows);
+        return ResponseEntity.ok(new LinkedHashSet<>(filteredRows));
     }
 }
