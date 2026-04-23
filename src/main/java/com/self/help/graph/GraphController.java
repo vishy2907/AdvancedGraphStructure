@@ -32,6 +32,20 @@ public class GraphController {
         return graphService.getUniqueNode();
     }
 
+    @GetMapping("/graph/aggregate")
+    public GraphAggregateStats getAggregateStats() {
+        return graphService.getAggregateStats();
+    }
+
+    @PostMapping("/graph/aggregate")
+    public GraphAggregateStats getAggregateStatsForNodes(@RequestBody List<String> nodeNames) {
+        if (nodeNames == null || nodeNames.isEmpty()) {
+            return graphService.getAggregateStats();
+        }
+
+        return graphService.getAggregateStats(nodeNames);
+    }
+
     @PostMapping("/addRow")
     public ResponseEntity<Set<Row>> addRow(@RequestBody Row row) {
         graphService.addRow(row);

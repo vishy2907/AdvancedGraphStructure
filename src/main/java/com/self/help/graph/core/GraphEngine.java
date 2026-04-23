@@ -1,5 +1,6 @@
 package com.self.help.graph.core;
 
+import com.self.help.graph.GraphAggregateStats;
 import lombok.Data;
 import org.roaringbitmap.IntIterator;
 import org.roaringbitmap.RoaringBitmap;
@@ -49,6 +50,8 @@ public class GraphEngine {
         int toAttrId = attribute1Dict.getOrCreateId(toAttribute1);
         int relId = relDict.getOrCreateId(relation);
 
+        markDuplicateRowsAsDeleted(fromId, fromAttrId, toId, toAttrId, relId);
+
         int rowId = rowStore.addRow(fromId, fromAttrId, toId, toAttrId, relId);
 
         fromInverted.addRowToValue(fromId, rowId);
@@ -59,30 +62,8 @@ public class GraphEngine {
     }
 
     public Set<Row> getMappedRows() {
-        int rowCount = rowStore.getRowCount();
-        Set<Row> results = new LinkedHashSet<>();
-
-        for (int i = 0; i < rowCount; i++) {
-            // 1. Get the Dict IDs from the RowStore (Forward Index)
-            int fromId = rowStore.getFromId(i);
-            int fromAttr1 = rowStore.getFromAttr1Id(i);
-            int toId = rowStore.getToId(i);
-            int toAttr1 = rowStore.getToAttr1Id(i);
-            int relId = rowStore.getRelId(i);
-
-
-            // 2. Translate Dict IDs back to Strings using Dictionaries
-            String fromValue = nodeDict.getValue(fromId);
-            String fromAttrValue = attribute1Dict.getValue(fromAttr1);
-            String toValue = nodeDict.getValue(toId);
-            String toAttrValue = attribute1Dict.getValue(toAttr1);
-            String relValue = relDict.getValue(relId);
-
-            // 3. Create the Record and add to list
-            results.add(new Row(fromValue, fromAttrValue, toValue, toAttrValue, relValue));
-        }
-
-        return results;
+        RoaringBitmap activeRows = getActiveRowIds();
+        return new LinkedHashSet<>(hydrateRows(activeRows));
     }
 
     public List<Row> concentrateByRelation(List<String> relations) {
@@ -92,7 +73,7 @@ public class GraphEngine {
         for (String relation : relations) {
             // 2. Get the Dict ID for this specific relation
             // We use a safe lookup (not getOrCreate) to avoid polluting the dict
-            int relId = relDict.getOrCreateId(relation);
+            int relId = relDict.getIdIfExists(relation);
 
             if (relId != -1) {
                 // 3. Perform Bitwise OR: O(N) where N is number of matching rows
@@ -119,6 +100,31 @@ public class GraphEngine {
         return results;
     }
 
+    public GraphAggregateStats getAggregateStats() {
+        int activeRowCount = getActiveRowIds().getCardinality();
+        return new GraphAggregateStats("all", List.of(), activeRowCount, activeRowCount, activeRowCount);
+    }
+
+    public GraphAggregateStats getAggregateStats(List<String> nodeNames) {
+        RoaringBitmap selectedNodeIds = resolveNodeIds(nodeNames);
+        if (selectedNodeIds.isEmpty()) {
+            return new GraphAggregateStats("selected", List.copyOf(nodeNames), 0, 0, 0);
+        }
+
+        RoaringBitmap outgoingRows = collectRowsForNodes(selectedNodeIds, false);
+        RoaringBitmap incomingRows = collectRowsForNodes(selectedNodeIds, true);
+        RoaringBitmap uniqueRows = outgoingRows.clone();
+        uniqueRows.or(incomingRows);
+
+        return new GraphAggregateStats(
+                "selected",
+                List.copyOf(nodeNames),
+                outgoingRows.getCardinality(),
+                incomingRows.getCardinality(),
+                uniqueRows.getCardinality()
+        );
+    }
+
     public Set<String> getUniqueRelations() {
         Set<String> results = new LinkedHashSet<>();
         for (int i = 0; i < relDict.size(); i++) {
@@ -141,13 +147,7 @@ public class GraphEngine {
      */
     public List<Row> concentrateOnNodes(List<String> nodeNames) {
         // 1. Resolve Seed Node IDs
-        RoaringBitmap seedNodeIds = new RoaringBitmap();
-        for (String name : nodeNames) {
-            int id = nodeDict.getIdIfExists(name); // Assuming you added getIdIfExists
-            if (id != -1) {
-                seedNodeIds.add(id);
-            }
-        }
+        RoaringBitmap seedNodeIds = resolveNodeIds(nodeNames);
 
         if (seedNodeIds.isEmpty()) {
             return Collections.emptyList();
@@ -164,6 +164,60 @@ public class GraphEngine {
 
         // 5. Hydrate the final unique set of edges back into Objects
         return hydrateRows(collectedRows);
+    }
+
+    private RoaringBitmap resolveNodeIds(List<String> nodeNames) {
+        RoaringBitmap nodeIds = new RoaringBitmap();
+        for (String name : nodeNames) {
+            int id = nodeDict.getIdIfExists(name);
+            if (id != -1) {
+                nodeIds.add(id);
+            }
+        }
+        return nodeIds;
+    }
+
+    private RoaringBitmap collectRowsForNodes(RoaringBitmap nodeIds, boolean incoming) {
+        RoaringBitmap rows = new RoaringBitmap();
+        IntIterator it = nodeIds.getIntIterator();
+
+        while (it.hasNext()) {
+            int nodeId = it.next();
+            rows.or(incoming ? toInverted.getRowsForValue(nodeId) : fromInverted.getRowsForValue(nodeId));
+        }
+
+        rows.andNot(getDeletedRowIds());
+        return rows;
+    }
+
+    private void markDuplicateRowsAsDeleted(int fromId, int fromAttrId, int toId, int toAttrId, int relId) {
+        RoaringBitmap duplicateRows = fromInverted.getRowsForValue(fromId).clone();
+        duplicateRows.and(fromAttribute1Inverted.getRowsForValue(fromAttrId));
+        duplicateRows.and(toInverted.getRowsForValue(toId));
+        duplicateRows.and(toAttribute1Inverted.getRowsForValue(toAttrId));
+        duplicateRows.and(relationInverted.getRowsForValue(relId));
+        duplicateRows.andNot(getDeletedRowIds());
+
+        if (!duplicateRows.isEmpty()) {
+            deletedFromRows.or(duplicateRows);
+            deletedToRows.or(duplicateRows);
+        }
+    }
+
+    private RoaringBitmap getDeletedRowIds() {
+        RoaringBitmap deletedRows = deletedFromRows.clone();
+        deletedRows.and(deletedToRows);
+        return deletedRows;
+    }
+
+    private RoaringBitmap getActiveRowIds() {
+        RoaringBitmap activeRows = new RoaringBitmap();
+        int rowCount = rowStore.getRowCount();
+        if (rowCount > 0) {
+            activeRows.add(0L, rowCount);
+            activeRows.andNot(getDeletedRowIds());
+        }
+        return activeRows;
     }
 
     /**
@@ -189,8 +243,9 @@ public class GraphEngine {
                 // Step A: Find matching edges for this Node
                 // Upward = Who points to me? (I am the 'To' node)
                 // Downward = Who do I point to? (I am the 'From' node)
-                RoaringBitmap rows = isUpward ? toInverted.getRowsForValue(nodeId)
-                        : fromInverted.getRowsForValue(nodeId);
+                RoaringBitmap rows = (isUpward ? toInverted.getRowsForValue(nodeId)
+                        : fromInverted.getRowsForValue(nodeId)).clone();
+                rows.andNot(getDeletedRowIds());
 
                 // Step B: Accumulate these Row IDs into the global output
                 collectedRows.or(rows);

@@ -40,4 +40,12 @@ public class GraphService {
     public List<Row> concentrateOnNodes(List<String> nodeNames) {
         return graphEngine.concentrateOnNodes(nodeNames);
     }
+
+    public GraphAggregateStats getAggregateStats() {
+        return graphEngine.getAggregateStats();
+    }
+
+    public GraphAggregateStats getAggregateStats(List<String> nodeNames) {
+        return graphEngine.getAggregateStats(nodeNames);
+    }
 }
